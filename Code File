@@ -1,0 +1,90 @@
+import openpyxl
+import math
+import pandas as pd
+
+path = /path/to/your/inpit/excel/file
+obj = openpyxl.load_workbook(path, data_only=True)
+sheet_obj = obj.active
+
+motor_efficiency = {}
+
+for i in range(4, 46):
+    x = sheet_obj.cell(row=i, column=2).value
+    motor_efficiency[x] = {}
+
+for i in motor_efficiency:
+    for j in range(4, 18):
+        x = sheet_obj.cell(row=i + 4, column=j).value
+        y = sheet_obj.cell(row=3, column=j).value
+        motor_efficiency[i][y] = x if x is None else round(x, 5)
+
+total_loss = {}
+
+for i in range(4, 46):
+    x = sheet_obj.cell(row=i, column=56).value
+    total_loss[x] = {}
+
+for i in total_loss:
+    for j in range(58, 72):
+        x = sheet_obj.cell(row=i + 4, column=j).value
+        y = sheet_obj.cell(row=3, column=j).value
+        total_loss[i][y] = x if x is None else round(x, 5)
+
+torque_min = 0
+torque_max = 41
+
+
+def calc_duty(T_min, T_max, T_req):
+    d = (T_req - T_min) / (T_max - T_min)
+    return d
+
+
+def loss(T_min, T_max, duty_cycle, RPM, map=total_loss):
+    t_max, t_min = map[T_max][RPM], map[T_min][RPM]
+    if t_max is None or t_min is None:
+        return -1
+    res = duty_cycle * (t_max) + (1 - duty_cycle) * (t_min)
+    return res
+
+
+def main():
+    column_st = 2
+    writer = pd.ExcelWriter(r'your_output_file.xlsx', engine='openpyxl')
+
+    for speed in range(500, 7001, 500):
+        sheet_name = str(speed) + " RPM"
+        dataset = []
+        for required_torque in range(1, 42):
+            l = []
+            omega = (2 * math.pi * speed) / 60
+            output_power = required_torque * omega
+            original_efficiency = motor_efficiency.get(required_torque, {}).get(speed, -1)
+
+            if original_efficiency is None or original_efficiency == -1:
+                continue
+
+            for i in range(required_torque):
+                for j in range(required_torque + 1, 42):
+                    x = calc_duty(i, j, required_torque)
+                    current_losses = loss(i, j, x, speed)
+                    new_efficiency = (output_power / (output_power + current_losses)) * 100
+                    if current_losses == -1:
+                        continue
+                    l.append([speed, required_torque, i, j, x * 100, original_efficiency, new_efficiency, new_efficiency - original_efficiency, current_losses])
+            l.sort(key = lambda x : x[6],reverse = True)
+            if len(l):
+                l.insert(0, ["Speed", "Req Torque", "Min Torque", "Max Torque", "Duty Cycle", "Original Efficiency", "New Efficiency", "Difference", "New Loss"])
+                df = pd.DataFrame(l)
+            #     dataset.append(df)
+            # for dataframe in dataset:
+                if required_torque == 1 :
+                    df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1, startcol=1)
+                else :
+                    df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1, startcol=((required_torque) - 1) * 10 + 1)
+            # break
+
+        writer._save()  # Correct method to save the Excel file when using openpyxl engine
+
+
+if __name__ == '__main__':
+    main()
